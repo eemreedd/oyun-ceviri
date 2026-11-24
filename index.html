@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="tr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Oyun Çeviri</title>
+<style>
+:root{--bg:#f4f6fb;--card:#fff;--tx:#141a26;--mu:#5d6778;--ac:#2f6df6;--ok:#1a9b52;--bad:#d93a3a;--ln:#dfe4ee;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0b0f17;--card:#151b27;--tx:#e8edf5;--mu:#8b96a8;--ac:#4f8cff;--ok:#2ecc71;--bad:#ff5d5d;--ln:#243049;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0b0f17;--card:#151b27;--tx:#e8edf5;--mu:#8b96a8;--ac:#4f8cff;--ok:#2ecc71;--bad:#ff5d5d;--ln:#243049;color-scheme:dark}
+*{box-sizing:border-box}html,body{margin:0}
+body{background:var(--bg);color:var(--tx);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:12px;max-width:640px;margin:0 auto}
+.card{background:var(--card);border:1px solid var(--ln);border-radius:14px;padding:12px;margin-bottom:10px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font-size:12px;padding:4px 9px;border-radius:99px;border:1px solid var(--ln);color:var(--mu)}
+.chip.on{color:var(--ok);border-color:var(--ok)}.chip.err{color:var(--bad);border-color:var(--bad)}
+.row{display:flex;gap:8px;align-items:center;margin-top:8px}
+select,input[type=range]{flex:1;min-width:0}
+select{background:var(--bg);color:var(--tx);border:1px solid var(--ln);border-radius:10px;padding:9px}
+.seg{display:flex;border:1px solid var(--ln);border-radius:10px;overflow:hidden;flex:1}
+.seg button{flex:1;border:0;padding:10px;background:transparent;color:var(--mu);font-size:15px}
+.seg button.a{background:var(--ac);color:#fff}
+#go{width:100%;border:0;border-radius:14px;padding:16px;font-size:18px;font-weight:600;background:var(--ac);color:#fff;margin-bottom:10px}
+#go.run{background:var(--bad)}
+#tr{font-size:26px;font-weight:650;min-height:2.6em}
+#en{color:var(--mu);font-size:15px;min-height:1.4em;margin-top:6px}
+#em{font-size:13px;color:var(--ac);margin-top:4px;min-height:1em}
+#hist div{padding:6px 0;border-top:1px solid var(--ln);font-size:14px}
+#hist small{color:var(--mu);display:block}
+#note{font-size:13px;color:var(--mu)}
+label{font-size:13px;color:var(--mu)}
+</style></head><body>
+<div class="card"><div class="chips">
+<span class="chip" id="cMic">Mikrofon: kapalı</span>
+<span class="chip" id="cVoice">Ses: yok</span>
+<span class="chip" id="cEng">Çeviri: ?</span>
+<span class="chip" id="cLat">Gecikme: –</span>
+<span class="chip">PS5: mikrofonla dinleme</span></div>
+<div class="row"><label>Kaynak</label>
+<select id="lang"><option value="en-US">İngilizce (US)</option><option value="en-GB">İngilizce (UK)</option><option value="ja-JP">Japonca</option><option value="ko-KR">Korece</option><option value="es-ES">İspanyolca</option><option value="fr-FR">Fransızca</option><option value="de-DE">Almanca</option><option value="ru-RU">Rusça</option></select>
+<label>Hedef</label><select disabled><option>Türkçe</option></select></div>
+<div class="row"><div class="seg"><button id="mSub" class="a">Altyazı</button><button id="mDub">Dublaj</button></div></div>
+<div class="row"><label>Ses</label><input type="range" id="vol" min="0.2" max="1" step="0.05" value="1"></div></div>
+<button id="go">Başlat</button>
+<div class="card"><div id="tr">Başlat’a bas, sonra telefonu TV’ye yaklaştır.</div><div id="en"></div><div id="em"></div></div>
+<div class="card"><div id="hist"></div><div id="note"></div></div>
+<script>
+const $=s=>document.querySelector(s);
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+let rec,on=false,speaking=false,sample=null,dict=null,local=null,mode='sub',busy=false,q=[],lock=null,hist=[];
+const EM={"öfke":[1.15,.85,1],"üzgün":[.85,.8,.85],"heyecan":[1.2,1.2,1],"fısıltı":[.9,.9,.3],"alaycı":[.9,1.05,.9],"korku":[1.2,1.15,.8],"sakin":[1,1,.9]};
+const chip=(id,t,c)=>{const e=$(id);e.textContent=t;e.className="chip "+(c||"")};
+const note=t=>$("#note").textContent=t;
+local={translate:async t=>{const l=$("#lang").value.slice(0,2);const r=await(await fetch("https://api.mymemory.translated.net/get?q="+encodeURIComponent(t)+"&langpair="+l+"|tr")).json();if(r.responseStatus!=200||/MYMEMORY WARNING/i.test(r.responseData.translatedText))throw{code:"rate_limited"};return r.responseData.translatedText}};
+function eng(){chip("#cEng","Çeviri: MyMemory (ücretsiz)","on")}
+eng();
+if(!SR)note("Bu tarayıcıda konuşma tanıma yok. iPhone’da Safari kullan.");
+$("#mSub").onclick=()=>setMode("sub");$("#mDub").onclick=()=>setMode("dub");
+function setMode(m){mode=m;$("#mSub").className=m=="sub"?"a":"";$("#mDub").className=m=="dub"?"a":"";if(m=="sub")speechSynthesis.cancel();else{speechSynthesis.speak(new SpeechSynthesisUtterance(""));note("Dublajda TV sesini elle kıs, kulaklık tak. Ses çalarken dinleme duraklar.")}}
+$("#go").onclick=()=>{
+ if(on){stop();return}
+ on=true;$("#go").textContent="Durdur";$("#go").className="run";
+ if(dict)dictStart();else if(SR)startRec();else{note("Bu tarayıcıda konuşma tanıma yok. iPhone’da Safari kullan.");stop();return}
+ if(mode=="dub")speechSynthesis.speak(new SpeechSynthesisUtterance(""));
+ prep();
+};
+async function prep(){
+ try{lock=await navigator.wakeLock.request("screen")}catch(e){}
+}
+function stop(){on=false;try{rec&&rec.stop()}catch(e){}try{dict&&dict.stop().catch(()=>{})}catch(e){}speechSynthesis.cancel();try{lock&&lock.release()}catch(e){}$("#go").textContent="Başlat";$("#go").className="";chip("#cMic","Mikrofon: kapalı");chip("#cVoice","Ses: yok")}
+function startRec(){
+ if(!on||speaking)return;
+ rec=new SR();rec.lang=$("#lang").value;rec.continuous=true;rec.interimResults=true;
+ rec.onstart=()=>chip("#cMic","Mikrofon: açık","on");
+ rec.onresult=e=>{let it="";for(let i=e.resultIndex;i<e.results.length;i++){const r=e.results[i];if(r.isFinal)add(r[0].transcript.trim());else it+=r[0].transcript}
+  if(it){$("#en").textContent=it;chip("#cVoice","Ses: algılandı","on")}};
+ rec.onerror=e=>{if(e.error=="not-allowed"||e.error=="service-not-allowed"){note("Mikrofon/konuşma izni yok. Safari’de izin ver ve Ayarlar > Genel > Klavye > Dikteyi Etkinleştir’i aç.");chip("#cMic","Mikrofon: izin yok","err");on=false;stop()}};
+ rec.onend=()=>{chip("#cVoice","Ses: yok");if(on&&!speaking)setTimeout(startRec,200)};
+ try{rec.start()}catch(e){}
+}
+function dictStart(){
+ if(!dictStart.r){dictStart.r=1;
+  dict.onPartial(({text})=>{if(!speaking&&text){$("#en").textContent=text;chip("#cVoice","Ses: algılandı","on")}});
+  dict.onFinal(({text})=>{if(!speaking)add(text.trim())});
+  dict.onState(({state,reason})=>{chip("#cMic",state=="listening"?"Mikrofon: açık":"Mikrofon: kapalı",state=="listening"?"on":"");if(state=="idle"&&on&&reason=="viewer_stopped")stop()});
+ }
+ dict.start({language:$("#lang").value.slice(0,2)}).catch(e=>{
+  const c=e&&e.code;if(c=="stopped")return;
+  if(SR&&c!="not_granted"){startRec();return}
+  note(c=="not_granted"?"Mikrofon izni verilmedi. Sayfanın İzinler menüsünden aç.":c=="rate_limited"?"Mikrofon şu an meşgul, biraz sonra dene.":"Konuşma tanıma başlatılamadı: "+(c||"bilinmiyor"));
+  stop();
+ });
+}
+function add(t){if(!t)return;q.push({t,t0:performance.now()});if(q.length>3)q.shift();pump()}
+async function pump(){
+ if(busy)return;busy=true;
+ while(q.length){const it=q.shift();$("#en").textContent=it.t;let r;
+  try{
+   if(local)r={tr:await local.translate(it.t),emotion:guess(it.t),gender:"?"};
+   else if(sample){
+    const p="Oyun diyaloğu satırını doğal ve kısa Türkçeye çevir; oyun tonunu koru. Yalnızca JSON döndür: {\"tr\":\"...\",\"emotion\":\"öfke|üzgün|heyecan|fısıltı|alaycı|korku|sakin\",\"gender\":\"e|k|?\"}\nÖnceki satırlar: "+hist.slice(-2).map(h=>h.en).join(" / ")+"\nSatır: "+it.t;
+    r=await sample.json(p,{modelTier:"quick",cache:false});
+   }else r={tr:"(çeviri motoru yok)",emotion:"sakin",gender:"?"};
+  }catch(e){const c=e&&e.code;note(c=="rate_limited"?"Ücretsiz çeviri sınırı doldu veya yoğun, sonra dene.":c=="not_granted"?"Claude kullanımına izin verilmedi.":"Çeviri hatası: "+(c||"bilinmiyor"));if(c=="not_granted"||c=="sampling_disabled")sample=null,eng();continue}
+  const em=EM[r.emotion]?r.emotion:"sakin";
+  $("#tr").textContent=r.tr;$("#em").textContent="Duygu: "+em;
+  const ms=Math.round(performance.now()-it.t0);chip("#cLat","Gecikme: "+(ms/1000).toFixed(1)+" sn",ms<4000?"on":"");
+  hist.push({en:it.t,tr:r.tr});hist=hist.slice(-12);
+  $("#hist").replaceChildren(...hist.slice(-6).reverse().map(h=>{const d=document.createElement("div");d.textContent=h.tr;const s=document.createElement("small");s.textContent=h.en;d.append(s);return d}));
+  if(mode=="dub")speak(r.tr,em,r.gender);
+ }
+ busy=false;
+}
+function guess(t){
+ if(/\b(kill|hate|damn|bastard|shut up|get out|how dare)\b/i.test(t)||(t.length>6&&t==t.toUpperCase()))return"öfke";
+ if(/\b(sorry|lost|miss you|gone|died|cry)\b/i.test(t))return"üzgün";
+ if(/\b(shh+|quiet|whisper|hush)\b/i.test(t))return"fısıltı";
+ if(/!/.test(t))return"heyecan";
+ if(/\.\.\.|yeah,? right/i.test(t))return"alaycı";
+ return"sakin";
+}
+function speak(t,em,g){
+ const p=EM[em],u=new SpeechSynthesisUtterance(t);u.lang="tr-TR";
+ const v=speechSynthesis.getVoices().find(v=>v.lang.replace("_","-").toLowerCase().startsWith("tr"));if(v)u.voice=v;
+ u.rate=p[0];u.pitch=Math.min(2,p[1]*(g=="e"?.85:g=="k"?1.1:1));u.volume=Math.min(1,p[2]*(+$("#vol").value));
+ speechSynthesis.cancel();speaking=true;try{rec&&rec.stop()}catch(e){}
+ u.onend=u.onerror=()=>{speaking=false;if(on&&SR)setTimeout(startRec,150)};
+ speechSynthesis.speak(u);
+}
+</script></body></html>
